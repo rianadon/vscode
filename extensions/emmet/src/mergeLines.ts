@@ -8,39 +8,40 @@ import { Node } from 'EmmetNode';
 import { getNode, parseDocument, validate } from './util';
 
 export function mergeLines() {
-	let editor = vscode.window.activeTextEditor;
-	if (!validate(false)) {
+	if (!validate(false) || !vscode.window.activeTextEditor) {
 		return;
 	}
+
+	const editor = vscode.window.activeTextEditor;
 
 	let rootNode = parseDocument(editor.document);
 	if (!rootNode) {
 		return;
 	}
 
-	editor.edit(editBuilder => {
+	return editor.edit(editBuilder => {
 		editor.selections.reverse().forEach(selection => {
-			let [rangeToReplace, textToReplaceWith] = getRangesToReplace(editor.document, selection, rootNode);
-			if (rangeToReplace && textToReplaceWith) {
-				editBuilder.replace(rangeToReplace, textToReplaceWith);
+			let textEdit = getRangesToReplace(editor.document, selection, rootNode!);
+			if (textEdit) {
+				editBuilder.replace(textEdit.range, textEdit.newText);
 			}
 		});
 	});
 }
 
-function getRangesToReplace(document: vscode.TextDocument, selection: vscode.Selection, rootNode: Node): [vscode.Range, string] {
-	let startNodeToUpdate: Node;
-	let endNodeToUpdate: Node;
+function getRangesToReplace(document: vscode.TextDocument, selection: vscode.Selection, rootNode: Node): vscode.TextEdit | undefined {
+	let startNodeToUpdate: Node | null;
+	let endNodeToUpdate: Node | null;
 
 	if (selection.isEmpty) {
-		startNodeToUpdate = endNodeToUpdate = getNode(rootNode, selection.start);
+		startNodeToUpdate = endNodeToUpdate = getNode(rootNode, selection.start, true);
 	} else {
 		startNodeToUpdate = getNode(rootNode, selection.start, true);
 		endNodeToUpdate = getNode(rootNode, selection.end, true);
 	}
 
-	if (!startNodeToUpdate || !endNodeToUpdate) {
-		return [null, null];
+	if (!startNodeToUpdate || !endNodeToUpdate || startNodeToUpdate.start.line === endNodeToUpdate.end.line) {
+		return;
 	}
 
 	let rangeToReplace = new vscode.Range(startNodeToUpdate.start, endNodeToUpdate.end);
@@ -49,5 +50,5 @@ function getRangesToReplace(document: vscode.TextDocument, selection: vscode.Sel
 		textToReplaceWith += document.lineAt(i).text.trim();
 	}
 
-	return [rangeToReplace, textToReplaceWith];
+	return new vscode.TextEdit(rangeToReplace, textToReplaceWith);
 }

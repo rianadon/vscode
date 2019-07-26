@@ -3,10 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
-import assert = require('assert');
-import platform = require('vs/base/common/platform');
+import * as assert from 'assert';
+import * as platform from 'vs/base/common/platform';
 
 import { NsfwWatcherService } from 'vs/workbench/services/files/node/watcher/nsfw/nsfwWatcherService';
 import { IWatcherRequest } from 'vs/workbench/services/files/node/watcher/nsfw/watcher';
@@ -15,9 +13,9 @@ class TestNsfwWatcherService extends NsfwWatcherService {
 	public normalizeRoots(roots: string[]): string[] {
 		// Work with strings as paths to simplify testing
 		const requests: IWatcherRequest[] = roots.map(r => {
-			return { basePath: r, ignored: [] };
+			return { path: r, excludes: [] };
 		});
-		return this._normalizeRoots(requests).map(r => r.basePath);
+		return this._normalizeRoots(requests).map(r => r.path);
 	}
 }
 

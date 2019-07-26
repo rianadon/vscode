@@ -2,40 +2,40 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import { TPromise } from 'vs/base/common/winjs.base';
 import { ICredentialsService } from 'vs/platform/credentials/common/credentials';
-import * as keytarType from 'keytar';
+import { IdleValue } from 'vs/base/common/async';
 
-export class CredentialsService implements ICredentialsService {
+type KeytarModule = {
+	getPassword(service: string, account: string): Promise<string | null>;
+	setPassword(service: string, account: string, password: string): Promise<void>;
+	deletePassword(service: string, account: string): Promise<boolean>;
+	findPassword(service: string): Promise<string | null>;
+};
+
+export class KeytarCredentialsService implements ICredentialsService {
 
 	_serviceBrand: any;
 
-	private keytarPromise: TPromise<typeof keytarType>;
+	private readonly _keytar = new IdleValue<Promise<KeytarModule>>(() => import('keytar'));
 
-	readSecret(service: string, account: string): TPromise<string | undefined> {
-		return this.getKeytar()
-			.then(keytar => TPromise.wrap(keytar.getPassword(service, account)))
-			.then(result => result === null ? undefined : result);
+	async getPassword(service: string, account: string): Promise<string | null> {
+		const keytar = await this._keytar.getValue();
+		return keytar.getPassword(service, account);
 	}
 
-	writeSecret(service: string, account: string, secret: string): TPromise<void> {
-		return this.getKeytar()
-			.then(keytar => TPromise.wrap(keytar.setPassword(service, account, secret)));
+	async setPassword(service: string, account: string, password: string): Promise<void> {
+		const keytar = await this._keytar.getValue();
+		return keytar.setPassword(service, account, password);
 	}
 
-	deleteSecret(service: string, account: string): TPromise<boolean> {
-		return this.getKeytar()
-			.then(keytar => TPromise.wrap(keytar.deletePassword(service, account)));
+	async deletePassword(service: string, account: string): Promise<boolean> {
+		const keytar = await this._keytar.getValue();
+		return keytar.deletePassword(service, account);
 	}
 
-	private getKeytar(): TPromise<typeof keytarType> {
-		if (!this.keytarPromise) {
-			this.keytarPromise = new TPromise<typeof keytarType>((c, e) => {
-				require(['keytar'], c, e);
-			});
-		}
-		return this.keytarPromise;
+	async findPassword(service: string): Promise<string | null> {
+		const keytar = await this._keytar.getValue();
+		return keytar.findPassword(service);
 	}
 }

@@ -3,95 +3,96 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
-import { TPromise } from 'vs/base/common/winjs.base';
 import { getNextTickChannel } from 'vs/base/parts/ipc/common/ipc';
 import { Client } from 'vs/base/parts/ipc/node/ipc.cp';
-import uri from 'vs/base/common/uri';
-import { toFileChangesEvent, IRawFileChange } from 'vs/workbench/services/files/node/watcher/common';
-import { IWatcherChannel, WatcherChannelClient } from 'vs/workbench/services/files/node/watcher/unix/watcherIpc';
-import { FileChangesEvent } from 'vs/platform/files/common/files';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { normalize } from 'path';
+import { IDiskFileChange, ILogMessage } from 'vs/workbench/services/files/node/watcher/watcher';
+import { WatcherChannelClient } from 'vs/workbench/services/files/node/watcher/unix/watcherIpc';
+import { Disposable } from 'vs/base/common/lifecycle';
+import { IWatcherRequest, IWatcherOptions } from 'vs/workbench/services/files/node/watcher/unix/watcher';
+import { getPathFromAmdModule } from 'vs/base/common/amd';
 
-export class FileWatcher {
-	private static MAX_RESTARTS = 5;
+export class FileWatcher extends Disposable {
+	private static readonly MAX_RESTARTS = 5;
 
 	private isDisposed: boolean;
 	private restartCounter: number;
+	private service: WatcherChannelClient;
 
 	constructor(
-		private contextService: IWorkspaceContextService,
-		private ignored: string[],
-		private onFileChanges: (changes: FileChangesEvent) => void,
-		private errorLogger: (msg: string) => void,
-		private verboseLogging: boolean
+		private folders: IWatcherRequest[],
+		private onFileChanges: (changes: IDiskFileChange[]) => void,
+		private onLogMessage: (msg: ILogMessage) => void,
+		private verboseLogging: boolean,
+		private watcherOptions: IWatcherOptions = {}
 	) {
+		super();
+
 		this.isDisposed = false;
 		this.restartCounter = 0;
+
+		this.startWatching();
 	}
 
-	public startWatching(): () => void {
-		const args = ['--type=watcherService'];
-
-		const client = new Client(
-			uri.parse(require.toUrl('bootstrap')).fsPath,
+	private startWatching(): void {
+		const client = this._register(new Client(
+			getPathFromAmdModule(require, 'bootstrap-fork'),
 			{
-				serverName: 'Watcher',
-				args,
+				serverName: 'File Watcher (chokidar)',
+				args: ['--type=watcherService'],
 				env: {
 					AMD_ENTRYPOINT: 'vs/workbench/services/files/node/watcher/unix/watcherApp',
 					PIPE_LOGGING: 'true',
-					VERBOSE_LOGGING: this.verboseLogging
+					VERBOSE_LOGGING: 'true' // transmit console logs from server to client
 				}
 			}
-		);
+		));
 
-		const channel = getNextTickChannel(client.getChannel<IWatcherChannel>('watcher'));
-		const service = new WatcherChannelClient(channel);
-
-		// Start watching
-		const basePath: string = normalize(this.contextService.getWorkspace().roots[0].fsPath);
-		service.watch({ basePath: basePath, ignored: this.ignored, verboseLogging: this.verboseLogging }).then(null, err => {
-			if (!this.isDisposed && !(err instanceof Error && err.name === 'Canceled' && err.message === 'Canceled')) {
-				return TPromise.wrapError(err); // the service lib uses the promise cancel error to indicate the process died, we do not want to bubble this up
-			}
-
-			return void 0;
-		}, (events: IRawFileChange[]) => this.onRawFileEvents(events)).done(() => {
-
+		this._register(client.onDidProcessExit(() => {
 			// our watcher app should never be completed because it keeps on watching. being in here indicates
 			// that the watcher process died and we want to restart it here. we only do it a max number of times
 			if (!this.isDisposed) {
 				if (this.restartCounter <= FileWatcher.MAX_RESTARTS) {
-					this.errorLogger('[FileWatcher] terminated unexpectedly and is restarted again...');
+					this.error('terminated unexpectedly and is restarted again...');
 					this.restartCounter++;
 					this.startWatching();
 				} else {
-					this.errorLogger('[FileWatcher] failed to start after retrying for some time, giving up. Please report this as a bug report!');
+					this.error('failed to start after retrying for some time, giving up. Please report this as a bug report!');
 				}
 			}
-		}, error => {
-			if (!this.isDisposed) {
-				this.errorLogger(error);
-			}
-		});
+		}));
 
-		return () => {
-			this.isDisposed = true;
-			client.dispose();
-		};
+		// Initialize watcher
+		const channel = getNextTickChannel(client.getChannel('watcher'));
+		this.service = new WatcherChannelClient(channel);
+
+		this.service.setVerboseLogging(this.verboseLogging);
+
+		this._register(this.service.watch(this.watcherOptions)(e => !this.isDisposed && this.onFileChanges(e)));
+
+		this._register(this.service.onLogMessage(m => this.onLogMessage(m)));
+
+		// Start watching
+		this.service.setRoots(this.folders);
 	}
 
-	private onRawFileEvents(events: IRawFileChange[]): void {
-		if (this.isDisposed) {
-			return;
-		}
+	error(message: string) {
+		this.onLogMessage({ type: 'error', message: `[File Watcher (chokidar)] ${message}` });
+	}
 
-		// Emit through event emitter
-		if (events.length > 0) {
-			this.onFileChanges(toFileChangesEvent(events));
-		}
+	setVerboseLogging(verboseLogging: boolean): void {
+		this.verboseLogging = verboseLogging;
+		this.service.setVerboseLogging(verboseLogging);
+	}
+
+	setFolders(folders: IWatcherRequest[]): void {
+		this.folders = folders;
+
+		this.service.setRoots(folders);
+	}
+
+	dispose(): void {
+		this.isDisposed = true;
+
+		super.dispose();
 	}
 }

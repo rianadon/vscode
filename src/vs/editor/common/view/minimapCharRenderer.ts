@@ -2,14 +2,13 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
+import { Emitter, Event } from 'vs/base/common/event';
+import { RGBA8 } from 'vs/editor/common/core/rgba';
 import { ColorId, TokenizationRegistry } from 'vs/editor/common/modes';
-import Event, { Emitter } from 'vs/base/common/event';
-import { RGBA } from 'vs/base/common/color';
 
 export class MinimapTokensColorTracker {
-	private static _INSTANCE: MinimapTokensColorTracker = null;
+	private static _INSTANCE: MinimapTokensColorTracker | null = null;
 	public static getInstance(): MinimapTokensColorTracker {
 		if (!this._INSTANCE) {
 			this._INSTANCE = new MinimapTokensColorTracker();
@@ -17,11 +16,11 @@ export class MinimapTokensColorTracker {
 		return this._INSTANCE;
 	}
 
-	private _colors: RGBA[];
+	private _colors: RGBA8[];
 	private _backgroundIsLight: boolean;
 
 	private _onDidChange = new Emitter<void>();
-	public onDidChange: Event<void> = this._onDidChange.event;
+	public readonly onDidChange: Event<void> = this._onDidChange.event;
 
 	private constructor() {
 		this._updateColorMap();
@@ -35,20 +34,22 @@ export class MinimapTokensColorTracker {
 	private _updateColorMap(): void {
 		const colorMap = TokenizationRegistry.getColorMap();
 		if (!colorMap) {
-			this._colors = [null];
+			this._colors = [RGBA8.Empty];
 			this._backgroundIsLight = true;
 			return;
 		}
-		this._colors = [null];
+		this._colors = [RGBA8.Empty];
 		for (let colorId = 1; colorId < colorMap.length; colorId++) {
-			this._colors[colorId] = colorMap[colorId].toRGBA();
+			const source = colorMap[colorId].rgba;
+			// Use a VM friendly data-type
+			this._colors[colorId] = new RGBA8(source.r, source.g, source.b, Math.round(source.a * 255));
 		}
-		let backgroundLuminosity = colorMap[ColorId.DefaultBackground].getLuminosity();
+		let backgroundLuminosity = colorMap[ColorId.DefaultBackground].getRelativeLuminance();
 		this._backgroundIsLight = (backgroundLuminosity >= 0.5);
-		this._onDidChange.fire(void 0);
+		this._onDidChange.fire(undefined);
 	}
 
-	public getColor(colorId: ColorId): RGBA {
+	public getColor(colorId: ColorId): RGBA8 {
 		if (colorId < 1 || colorId >= this._colors.length) {
 			// background color (basically invisible)
 			colorId = ColorId.DefaultBackground;
@@ -121,7 +122,7 @@ export class MinimapCharRenderer {
 		return (chCode % Constants.CHAR_COUNT);
 	}
 
-	public x2RenderChar(target: ImageData, dx: number, dy: number, chCode: number, color: RGBA, backgroundColor: RGBA, useLighterFont: boolean): void {
+	public x2RenderChar(target: ImageData, dx: number, dy: number, chCode: number, color: RGBA8, backgroundColor: RGBA8, useLighterFont: boolean): void {
 		if (dx + Constants.x2_CHAR_WIDTH > target.width || dy + Constants.x2_CHAR_HEIGHT > target.height) {
 			console.warn('bad render request outside image data');
 			return;
@@ -134,10 +135,12 @@ export class MinimapCharRenderer {
 		const backgroundR = backgroundColor.r;
 		const backgroundG = backgroundColor.g;
 		const backgroundB = backgroundColor.b;
+		const backgroundA = backgroundColor.a;
 
 		const deltaR = color.r - backgroundR;
 		const deltaG = color.g - backgroundG;
 		const deltaB = color.b - backgroundB;
+		const deltaA = color.a - backgroundA;
 
 		const dest = target.data;
 		const sourceOffset = chIndex * Constants.x2_CHAR_HEIGHT * Constants.x2_CHAR_WIDTH;
@@ -147,12 +150,14 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 		{
 			const c = x2CharData[sourceOffset + 1] / 255;
 			dest[destOffset + 4] = backgroundR + deltaR * c;
 			dest[destOffset + 5] = backgroundG + deltaG * c;
 			dest[destOffset + 6] = backgroundB + deltaB * c;
+			dest[destOffset + 7] = backgroundA + deltaA * c;
 		}
 
 		destOffset += outWidth;
@@ -161,12 +166,14 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 		{
 			const c = x2CharData[sourceOffset + 3] / 255;
 			dest[destOffset + 4] = backgroundR + deltaR * c;
 			dest[destOffset + 5] = backgroundG + deltaG * c;
 			dest[destOffset + 6] = backgroundB + deltaB * c;
+			dest[destOffset + 7] = backgroundA + deltaA * c;
 		}
 
 		destOffset += outWidth;
@@ -175,12 +182,14 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 		{
 			const c = x2CharData[sourceOffset + 5] / 255;
 			dest[destOffset + 4] = backgroundR + deltaR * c;
 			dest[destOffset + 5] = backgroundG + deltaG * c;
 			dest[destOffset + 6] = backgroundB + deltaB * c;
+			dest[destOffset + 7] = backgroundA + deltaA * c;
 		}
 
 		destOffset += outWidth;
@@ -189,16 +198,18 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 		{
 			const c = x2CharData[sourceOffset + 7] / 255;
 			dest[destOffset + 4] = backgroundR + deltaR * c;
 			dest[destOffset + 5] = backgroundG + deltaG * c;
 			dest[destOffset + 6] = backgroundB + deltaB * c;
+			dest[destOffset + 7] = backgroundA + deltaA * c;
 		}
 	}
 
-	public x1RenderChar(target: ImageData, dx: number, dy: number, chCode: number, color: RGBA, backgroundColor: RGBA, useLighterFont: boolean): void {
+	public x1RenderChar(target: ImageData, dx: number, dy: number, chCode: number, color: RGBA8, backgroundColor: RGBA8, useLighterFont: boolean): void {
 		if (dx + Constants.x1_CHAR_WIDTH > target.width || dy + Constants.x1_CHAR_HEIGHT > target.height) {
 			console.warn('bad render request outside image data');
 			return;
@@ -211,10 +222,12 @@ export class MinimapCharRenderer {
 		const backgroundR = backgroundColor.r;
 		const backgroundG = backgroundColor.g;
 		const backgroundB = backgroundColor.b;
+		const backgroundA = backgroundColor.a;
 
 		const deltaR = color.r - backgroundR;
 		const deltaG = color.g - backgroundG;
 		const deltaB = color.b - backgroundB;
+		const deltaA = color.a - backgroundA;
 
 		const dest = target.data;
 		const sourceOffset = chIndex * Constants.x1_CHAR_HEIGHT * Constants.x1_CHAR_WIDTH;
@@ -224,6 +237,7 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 
 		destOffset += outWidth;
@@ -232,10 +246,11 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = backgroundR + deltaR * c;
 			dest[destOffset + 1] = backgroundG + deltaG * c;
 			dest[destOffset + 2] = backgroundB + deltaB * c;
+			dest[destOffset + 3] = backgroundA + deltaA * c;
 		}
 	}
 
-	public x2BlockRenderChar(target: ImageData, dx: number, dy: number, color: RGBA, backgroundColor: RGBA, useLighterFont: boolean): void {
+	public x2BlockRenderChar(target: ImageData, dx: number, dy: number, color: RGBA8, backgroundColor: RGBA8, useLighterFont: boolean): void {
 		if (dx + Constants.x2_CHAR_WIDTH > target.width || dy + Constants.x2_CHAR_HEIGHT > target.height) {
 			console.warn('bad render request outside image data');
 			return;
@@ -248,14 +263,17 @@ export class MinimapCharRenderer {
 		const backgroundR = backgroundColor.r;
 		const backgroundG = backgroundColor.g;
 		const backgroundB = backgroundColor.b;
+		const backgroundA = backgroundColor.a;
 
 		const deltaR = color.r - backgroundR;
 		const deltaG = color.g - backgroundG;
 		const deltaB = color.b - backgroundB;
+		const deltaA = color.a - backgroundA;
 
 		const colorR = backgroundR + deltaR * c;
 		const colorG = backgroundG + deltaG * c;
 		const colorB = backgroundB + deltaB * c;
+		const colorA = backgroundA + deltaA * c;
 
 		const dest = target.data;
 		let destOffset = dy * outWidth + dx * Constants.RGBA_CHANNELS_CNT;
@@ -263,11 +281,13 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 		{
 			dest[destOffset + 4] = colorR;
 			dest[destOffset + 5] = colorG;
 			dest[destOffset + 6] = colorB;
+			dest[destOffset + 7] = colorA;
 		}
 
 		destOffset += outWidth;
@@ -275,11 +295,13 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 		{
 			dest[destOffset + 4] = colorR;
 			dest[destOffset + 5] = colorG;
 			dest[destOffset + 6] = colorB;
+			dest[destOffset + 7] = colorA;
 		}
 
 		destOffset += outWidth;
@@ -287,11 +309,13 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 		{
 			dest[destOffset + 4] = colorR;
 			dest[destOffset + 5] = colorG;
 			dest[destOffset + 6] = colorB;
+			dest[destOffset + 7] = colorA;
 		}
 
 		destOffset += outWidth;
@@ -299,15 +323,17 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 		{
 			dest[destOffset + 4] = colorR;
 			dest[destOffset + 5] = colorG;
 			dest[destOffset + 6] = colorB;
+			dest[destOffset + 7] = colorA;
 		}
 	}
 
-	public x1BlockRenderChar(target: ImageData, dx: number, dy: number, color: RGBA, backgroundColor: RGBA, useLighterFont: boolean): void {
+	public x1BlockRenderChar(target: ImageData, dx: number, dy: number, color: RGBA8, backgroundColor: RGBA8, useLighterFont: boolean): void {
 		if (dx + Constants.x1_CHAR_WIDTH > target.width || dy + Constants.x1_CHAR_HEIGHT > target.height) {
 			console.warn('bad render request outside image data');
 			return;
@@ -320,14 +346,17 @@ export class MinimapCharRenderer {
 		const backgroundR = backgroundColor.r;
 		const backgroundG = backgroundColor.g;
 		const backgroundB = backgroundColor.b;
+		const backgroundA = backgroundColor.a;
 
 		const deltaR = color.r - backgroundR;
 		const deltaG = color.g - backgroundG;
 		const deltaB = color.b - backgroundB;
+		const deltaA = color.a - backgroundA;
 
 		const colorR = backgroundR + deltaR * c;
 		const colorG = backgroundG + deltaG * c;
 		const colorB = backgroundB + deltaB * c;
+		const colorA = backgroundA + deltaA * c;
 
 		const dest = target.data;
 
@@ -336,6 +365,7 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 
 		destOffset += outWidth;
@@ -343,6 +373,7 @@ export class MinimapCharRenderer {
 			dest[destOffset + 0] = colorR;
 			dest[destOffset + 1] = colorG;
 			dest[destOffset + 2] = colorB;
+			dest[destOffset + 3] = colorA;
 		}
 	}
 }
